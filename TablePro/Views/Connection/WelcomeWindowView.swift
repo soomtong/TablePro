@@ -72,6 +72,14 @@ struct WelcomeWindowView: View {
         filteredConnections.filter { $0.groupId == group.id }
     }
 
+    private var visibleConnectionIds: [UUID] {
+        var ids = ungroupedConnections.map(\.id)
+        for group in activeGroups where !collapsedGroupIds.contains(group.id) {
+            ids.append(contentsOf: connections(in: group).map(\.id))
+        }
+        return ids
+    }
+
     var body: some View {
         ZStack {
             if showOnboarding {
@@ -318,6 +326,50 @@ struct WelcomeWindowView: View {
             }
             return .handled
         }
+        .onKeyPress("n", modifiers: .control) {
+            let ids = visibleConnectionIds
+            guard !ids.isEmpty else { return .handled }
+            guard let current = selectedConnectionId,
+                  let index = ids.firstIndex(of: current) else {
+                selectedConnectionId = ids.first
+                return .handled
+            }
+            if index < ids.count - 1 {
+                selectedConnectionId = ids[index + 1]
+            }
+            return .handled
+        }
+        .onKeyPress("p", modifiers: .control) {
+            let ids = visibleConnectionIds
+            guard !ids.isEmpty else { return .handled }
+            guard let current = selectedConnectionId,
+                  let index = ids.firstIndex(of: current) else {
+                selectedConnectionId = ids.last
+                return .handled
+            }
+            if index > 0 {
+                selectedConnectionId = ids[index - 1]
+            }
+            return .handled
+        }
+        .onKeyPress("h", modifiers: .control) {
+            guard let current = selectedConnectionId,
+                  let group = groupForConnection(current),
+                  !collapsedGroupIds.contains(group.id) else {
+                return .handled
+            }
+            setGroupCollapsed(group.id, collapsed: true)
+            return .handled
+        }
+        .onKeyPress("l", modifiers: .control) {
+            guard let current = selectedConnectionId,
+                  let group = groupForConnection(current),
+                  collapsedGroupIds.contains(group.id) else {
+                return .handled
+            }
+            setGroupCollapsed(group.id, collapsed: false)
+            return .handled
+        }
     }
 
     private func connectionRow(for connection: DatabaseConnection) -> some View {
@@ -349,17 +401,7 @@ struct WelcomeWindowView: View {
 
     private func groupHeader(for group: ConnectionGroup) -> some View {
         Button(action: {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                if collapsedGroupIds.contains(group.id) {
-                    collapsedGroupIds.remove(group.id)
-                } else {
-                    collapsedGroupIds.insert(group.id)
-                }
-                UserDefaults.standard.set(
-                    Array(collapsedGroupIds.map(\.uuidString)),
-                    forKey: "com.TablePro.collapsedGroupIds"
-                )
-            }
+            setGroupCollapsed(group.id, collapsed: !collapsedGroupIds.contains(group.id))
         }) {
             HStack(spacing: 6) {
                 Image(systemName: collapsedGroupIds.contains(group.id) ? "chevron.right" : "chevron.down")
@@ -552,6 +594,26 @@ struct WelcomeWindowView: View {
 
     private func loadGroups() {
         groups = groupStorage.loadGroups()
+    }
+
+    private func groupForConnection(_ connectionId: UUID) -> ConnectionGroup? {
+        guard let connection = filteredConnections.first(where: { $0.id == connectionId }),
+              let groupId = connection.groupId else { return nil }
+        return activeGroups.first { $0.id == groupId }
+    }
+
+    private func setGroupCollapsed(_ groupId: UUID, collapsed: Bool) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if collapsed {
+                collapsedGroupIds.insert(groupId)
+            } else {
+                collapsedGroupIds.remove(groupId)
+            }
+            UserDefaults.standard.set(
+                Array(collapsedGroupIds.map(\.uuidString)),
+                forKey: "com.TablePro.collapsedGroupIds"
+            )
+        }
     }
 
     private func deleteGroup(_ group: ConnectionGroup) {
